@@ -1,6 +1,6 @@
 /* ============================================================================
 *
-* FILE: TestLoad.java
+* FILE: ProtocolHandlerFactory.java
 *
 The MIT License (MIT)
 
@@ -26,40 +26,36 @@ SOFTWARE.
 *
 * ============================================================================
 */
-package com.reactivetechnologies.csvloader.test;
+package com.reactivetechnologies.csvloader.server;
 
-import java.util.Arrays;
+import java.io.DataInputStream;
+import java.nio.charset.StandardCharsets;
+/**
+ * Extend the factory to create custom handlers.
+ * This class should be overriden.
+ * 
+ */
+public class ProtocolHandlerFactory {
 
-import com.reactivetechnologies.csvloader.CSVLoader;
-
-public class TestLoad {
-
-  /*
-   * 
-    CREATE TABLE discounts (
-    id INT NOT NULL AUTO_INCREMENT,
-    title VARCHAR(255) NOT NULL,
-    expired_date DATE NOT NULL,
-    amount DECIMAL(10 , 2 ) NULL,
-    PRIMARY KEY (id)
-    );
-    
-    Wed May 21 00:00:00 EDT 2008
-   */
-  public static void main(String[] args) {
-    try 
-    {
-    CSVLoader.run(args);
-    
-  } catch (Exception e) {
-    e.printStackTrace();
+  public ProtocolHandler getObject()
+  {
+    return new AbstractProtocolHandler() {
+      
+      @Override
+      public byte[] doProcess(DataInputStream dataInputStream) throws Exception {
+        System.out.println("## THIS IS A DUMMY PROTOCOL PROCESSOR ##");
+        System.out.println("************* Processing **************");
+        System.out.println(dataInputStream.readInt());
+        System.out.println(dataInputStream.readDouble());
+        System.out.println(dataInputStream.readUTF());
+        System.out.println("************* End **************");
+        return "SUCCESS".getBytes(StandardCharsets.UTF_8);
+      }
+    };
   }
-    /*System.out.println(Arrays.toString(",hello,,got,".split(","))+" "+",hello,,got,".split(",",-1).length);
-    System.out.println(Arrays.toString("got".split(","))+" "+"got".split(",",-1).length);
-    System.out.println(Arrays.toString("got,".split(","))+" "+"got,".split(",",-1).length);
-    System.out.println(Arrays.toString(",got".split(","))+" "+",got".split(",",-1).length);
-    System.out.println(Arrays.toString(" , , ".split(","))+" "+",,".split(",",-1).length);
-    Integer.valueOf("");
-*/  }
-
+  
+  public boolean isSingleton()
+  {
+    return false;
+  }
 }

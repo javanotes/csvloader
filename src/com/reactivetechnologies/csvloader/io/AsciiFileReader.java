@@ -36,6 +36,7 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.SynchronousQueue;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 /**
  * A byte stream based reader. The fetching of bytes is performed in a separate thread than the reader thread.
@@ -52,11 +53,9 @@ public class AsciiFileReader extends Reader implements Runnable{
    */
   final static byte CARRIAGE_RETURN = 0xD;
   final static byte LINE_FEED = 0xA;
-  private static final Logger log = Logger.getLogger(AsciiFileReader.class.getSimpleName());
-  
   private byte[] lineBytesAccumulated;
-  private final AbstractFileChunkHandler fileReader;
-  private final Thread fetchThread;
+  private AbstractFileChunkHandler fileReader;
+  private Thread fetchThread;
   /**
    * New reader instance.
    * @param file the file to read
@@ -66,7 +65,22 @@ public class AsciiFileReader extends Reader implements Runnable{
   public AsciiFileReader(File file, boolean memMappedIO) throws IOException {
     super();
     this.fileReader = memMappedIO ? new MemoryMappedChunkHandler(file) : new ByteChannelChunkHandler(file, 8192);
-    fetchThread = new Thread(this);
+    doRun();
+  }
+  /**
+   * Default constructor to extend.
+   */
+  public AsciiFileReader()
+  {
+    super();
+    
+  }
+  /**
+   * Method to start the fetch run
+   */
+  protected void doRun()
+  {
+    fetchThread = new Thread(this, "Ascii.Splitter.Worker");
     fetchThread.start();
   }
   /**
@@ -79,7 +93,7 @@ public class AsciiFileReader extends Reader implements Runnable{
   }
   private final SynchronousQueue<byte[]> line = new SynchronousQueue<>();
   
-  private static boolean isEOF(byte[] bytes)
+  protected static boolean isEOF(byte[] bytes)
   {
     return bytes.length == 1 && bytes[0] == -1;
   }
@@ -111,26 +125,38 @@ public class AsciiFileReader extends Reader implements Runnable{
     
   }
   private volatile boolean streamComplete;
-  private void fetch() throws IOException
+  /**
+   * Method to be invoked for signalling an EOF.
+   */
+  protected void doEOF()
+  {
+    try {
+      line.put(new byte[]{-1});
+      streamComplete = true;
+    } catch (InterruptedException e) {
+      //throw new InterruptedIOException();
+    }
+  }
+  /**
+   * The method to be overridden for performing a byte fetch
+   * from source systems
+   * @throws IOException
+   */
+  protected void doFetch() throws IOException
   {
     FileChunk chunk = fileReader.readNext();
     while (chunk != null) {
       splitBytes(chunk.getChunk());
       chunk = fileReader.readNext();
     }
-    try {
-      line.put(new byte[]{-1});
-      streamComplete = true;
-    } catch (InterruptedException e) {
-      throw new InterruptedIOException();
-    }
+    doEOF();
   }
   /**
    * Check for line termination bytes or accumulate.
    * @param unicodeBytes
    * @throws IOException
    */
-  private void splitBytes(final byte[] unicodeBytes) throws IOException
+  protected void splitBytes(final byte[] unicodeBytes) throws IOException
   {
       byte[] oneSplit;
       int len = unicodeBytes.length;
@@ -198,23 +224,21 @@ public class AsciiFileReader extends Reader implements Runnable{
   }
   @Override
   public void close() throws IOException {
-    fileReader.close();
-    if(fetchThread.isAlive())
-      fetchThread.interrupt();
-  }
-  @Override
-  public void run() {
-    try {
-      Class.forName(ByteArrayBuilder.class.getName());
-    } catch (Exception e1) {
-      log.warning("sun.misc.Unsafe not loaded");
-    }
-    try {
-      fetch();
-    } catch (IOException e) {
-      e.printStackTrace();
+    if (fileReader != null) {
+      fileReader.close();
     }
     
+  }
+  private static final Logger log = Logger.getLogger(AsciiFileReader.class.getSimpleName());
+  @Override
+  public void run() {
+    
+    try {
+      doFetch();
+    } catch (IOException e) {
+      log.log(Level.SEVERE, "While running on fetch", e);
+    }
+    log.fine("End run");
   }
   private char[] charBuffer;
   @SuppressWarnings("unused")
@@ -254,5 +278,5 @@ public class AsciiFileReader extends Reader implements Runnable{
   
   }
   @Override
-  public int read(char[] cbuff, int off, int len) throws IOException {throw new UnsupportedOperationException("Use MemoryMappedReader::readLine()");}
+  public int read(char[] cbuff, int off, int len) throws IOException {throw new UnsupportedOperationException("Use ::readLine()");}
 }

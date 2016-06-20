@@ -1,6 +1,6 @@
 /* ============================================================================
 *
-* FILE: TestLoad.java
+* FILE: ColumnMeta.java
 *
 The MIT License (MIT)
 
@@ -26,40 +26,23 @@ SOFTWARE.
 *
 * ============================================================================
 */
-package com.reactivetechnologies.csvloader.test;
+package com.reactivetechnologies.csvloader.db;
 
-import java.util.Arrays;
-
-import com.reactivetechnologies.csvloader.CSVLoader;
-
-public class TestLoad {
-
-  /*
-   * 
-    CREATE TABLE discounts (
-    id INT NOT NULL AUTO_INCREMENT,
-    title VARCHAR(255) NOT NULL,
-    expired_date DATE NOT NULL,
-    amount DECIMAL(10 , 2 ) NULL,
-    PRIMARY KEY (id)
-    );
-    
-    Wed May 21 00:00:00 EDT 2008
-   */
-  public static void main(String[] args) {
-    try 
-    {
-    CSVLoader.run(args);
-    
-  } catch (Exception e) {
-    e.printStackTrace();
+class ColumnMeta
+{
+  public ColumnMeta(Class<?> type, String name, int sqlType, boolean notNull) {
+    super();
+    this.type = type;
+    this.name = name;
+    this.sqlType = sqlType;
+    this.notNull = notNull;
   }
-    /*System.out.println(Arrays.toString(",hello,,got,".split(","))+" "+",hello,,got,".split(",",-1).length);
-    System.out.println(Arrays.toString("got".split(","))+" "+"got".split(",",-1).length);
-    System.out.println(Arrays.toString("got,".split(","))+" "+"got,".split(",",-1).length);
-    System.out.println(Arrays.toString(",got".split(","))+" "+",got".split(",",-1).length);
-    System.out.println(Arrays.toString(" , , ".split(","))+" "+",,".split(",",-1).length);
-    Integer.valueOf("");
-*/  }
-
+  public boolean isNotNull() {
+    return notNull;
+  }
+  private final boolean notNull;
+  final Class<?> type;
+  final String name;
+  final int sqlType;
+  int size;
 }

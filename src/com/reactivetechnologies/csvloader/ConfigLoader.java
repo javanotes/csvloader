@@ -20,7 +20,9 @@ public class ConfigLoader {
 	public static final String LOAD_SQL_TEMPLATE = "LOAD_SQL_TEMPLATE";
 	public static final String LOAD_IGNORE_FIRST_LINE = "LOAD_IGNORE_FIRST_LINE";
 	public static final String INSERT_INTO_TABLE = "INSERT_INTO_TABLE";
+	public static final String SELECT_FROM_TABLE = "SELECT_FROM_TABLE";
 	public static final String TARGET_DATABASE = "TARGET_DATABASE";
+	public static final String SOURCE_DATABASE = "SOURCE_DATABASE";
 	
 	public static final String CPOOL_DATASOURCE = "CPOOL_DATASOURCE";
 	
@@ -50,19 +52,26 @@ public class ConfigLoader {
 	public static final String[] ISO_8601_DATE_FORMATS = {"yyyy-mm-dd HH:mm","yyyy-mm-dd HH:mm:ss", "yyyy-mm-dd HH:mmZ", "yyyy-mm-dd HH:mm:ssZ", "yyyy-mm-dd'T'HH:mm",
 	    "yyyy-mm-dd'T'HH:mmZ", "yyyy-mm-dd'T'HH:mm:ss", "yyyy-mm-dd'T'HH:mm:ssZ", "yyyy-mm-dd", "yyyy-mm-ddZ", "yyyy-mm", "yyyy"};
   public static final String COMMIT_ON_BATCH_FAIL = "COMMIT_ON_BATCH_FAIL";
+  
+  public static final String SYS_PROP_INORDER = "proc.inorder";
+  //public static final String SYS_PROP_INORDER_QSIZE = "proc.inorder.qsize";
+  public static final String SYS_PROP_MMAP_IO = "mem.mapped";
+  public static final String SYS_PROP_MMAP_SIZE = "mmap.size";
+  public static final String SYS_PROP_BUFF_IO = "buff.io";
+  public static final String SYS_PROP_THREADS = "max.thread";
+  public static final String SYS_PROP_SKIP_BLK_FLD = "skip.blank.field";
+  public static final String SYS_PROP_SKIP_INV_FLD = "skip.invalid.field";
+  public static final String SYS_PROP_DATE_FMT = "date.formats";
 
-	public static boolean isInOrderProcessing()
+	public static boolean isImmediateProcessing()
 	{
-	  return System.getProperty("inorderProcess") != null;
+	  return System.getProperty(ConfigLoader.SYS_PROP_INORDER) != null;
 	}
-	public static int inorderProcQSize()
-  {
-    try {
-      return Integer.valueOf(System.getProperty("inorderProcess.qsize"));
-    } catch (NumberFormatException e) {
-      return -1;
-    }
-  }
+	public static int getBatchSize()
+	{
+	  return Integer.valueOf(ConfigLoader.getConfig().getProperty(ConfigLoader.LOAD_BATCH_SIZE, "100"));
+	}
+	
 	private static Properties config = null;
 	
 	public static Properties getConfig() {

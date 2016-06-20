@@ -1,6 +1,6 @@
 /* ============================================================================
 *
-* FILE: TestLoad.java
+* FILE: ProtocolHandler.java
 *
 The MIT License (MIT)
 
@@ -26,40 +26,35 @@ SOFTWARE.
 *
 * ============================================================================
 */
-package com.reactivetechnologies.csvloader.test;
+package com.reactivetechnologies.csvloader.server;
 
-import java.util.Arrays;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.channels.SocketChannel;
+/**
+ * 
+ */
+public interface ProtocolHandler {
 
-import com.reactivetechnologies.csvloader.CSVLoader;
-
-public class TestLoad {
-
-  /*
-   * 
-    CREATE TABLE discounts (
-    id INT NOT NULL AUTO_INCREMENT,
-    title VARCHAR(255) NOT NULL,
-    expired_date DATE NOT NULL,
-    amount DECIMAL(10 , 2 ) NULL,
-    PRIMARY KEY (id)
-    );
-    
-    Wed May 21 00:00:00 EDT 2008
+  /**
+   * Get the input stream once read is complete.
+   * @return
    */
-  public static void main(String[] args) {
-    try 
-    {
-    CSVLoader.run(args);
-    
-  } catch (Exception e) {
-    e.printStackTrace();
-  }
-    /*System.out.println(Arrays.toString(",hello,,got,".split(","))+" "+",hello,,got,".split(",",-1).length);
-    System.out.println(Arrays.toString("got".split(","))+" "+"got".split(",",-1).length);
-    System.out.println(Arrays.toString("got,".split(","))+" "+"got,".split(",",-1).length);
-    System.out.println(Arrays.toString(",got".split(","))+" "+",got".split(",",-1).length);
-    System.out.println(Arrays.toString(" , , ".split(","))+" "+",,".split(",",-1).length);
-    Integer.valueOf("");
-*/  }
+  InputStream getReadStream();
+  /**
+   * Read from a given channel
+   * @return if read is complete
+   * @throws IOException
+   */
+  boolean doRead(SocketChannel channel) throws IOException;
 
+  /**
+   * Process the request and return bytes for response.
+   * @param dataInputStream
+   * @return
+   */
+  byte[] doProcess(DataInputStream dataInputStream) throws Exception;
+
+  
 }

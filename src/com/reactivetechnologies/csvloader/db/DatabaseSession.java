@@ -1,4 +1,4 @@
-package com.reactivetechnologies.csvloader;
+package com.reactivetechnologies.csvloader.db;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -27,6 +27,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.sql.DataSource;
+
+import com.reactivetechnologies.csvloader.ConfigLoader;
 
 public class DatabaseSession {
 	
@@ -177,11 +179,11 @@ public class DatabaseSession {
 	{
 	  if(dateFormats == null)
 	  {
-	    if(System.getProperty("date.formats") != null)
+	    if(System.getProperty(ConfigLoader.SYS_PROP_DATE_FMT) != null)
 	    {
 	      try 
 	      {
-          String[] formats = System.getProperty("date.formats").split(",");
+          String[] formats = System.getProperty(ConfigLoader.SYS_PROP_DATE_FMT).split(",");
           dateFormats = new SimpleDateFormat[formats.length];
           for(int i=0; i<formats.length; i++)
           {
@@ -357,7 +359,7 @@ public class DatabaseSession {
       {
         Class<?> type = dataTypes.get(i+1).type;
         
-        if(System.getProperty("skip.blank.field") != null && (values[i] == null || values[i].isEmpty()))
+        if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_BLK_FLD) != null && (values[i] == null || values[i].isEmpty()))
         {
           log.warning("[Rec#"+jobIndex+"] Skipping record with blank at param index "+(i+1)+". Value ["+values[i]+"]");
           return null;
@@ -369,7 +371,7 @@ public class DatabaseSession {
             params.put(dataTypes.get(i+1).name, Integer.valueOf(values[i]).toString());
           } catch (NumberFormatException e) {
             log.info("[Rec#"+jobIndex+"] ignoring invalid number "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -384,7 +386,7 @@ public class DatabaseSession {
             params.put(dataTypes.get(i+1).name,Long.valueOf(values[i]).toString());
           } catch (NumberFormatException e) {
             log.info("[Rec#"+jobIndex+"] ignoring invalid number "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -398,7 +400,7 @@ public class DatabaseSession {
             params.put(dataTypes.get(i+1).name,Double.valueOf(values[i]).toString());
           } catch (NumberFormatException e) {
             log.info("[Rec#"+jobIndex+"] ignoring invalid number "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -411,7 +413,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.info("[Rec#"+jobIndex+"] ignoring unparseable date "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -430,7 +432,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.info("[Rec#"+jobIndex+"] ignoring unparseable date "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -448,7 +450,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.info("[Rec#"+jobIndex+"] ignoring unparseable date "+values[i]);
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               params.put(dataTypes.get(i+1).name,"NULL");
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -494,7 +496,7 @@ public class DatabaseSession {
       {
         Class<?> type = dataTypes.get(i+1).type;
         
-        if(System.getProperty("skip.blank.field") != null && (values[i] == null || values[i].isEmpty()))
+        if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_BLK_FLD) != null && (values[i] == null || values[i].isEmpty()))
         {
           log.warning("[Rec#"+jobIndex+"] Skipping record with blank at param index "+(i+1)+". Value ["+values[i]+"]");
           insertPstmt.clearParameters();
@@ -509,7 +511,7 @@ public class DatabaseSession {
             insertPstmt.setObject(i+1, type == Integer.class ? bigInt.intValue() : bigInt.longValue());
           } catch (Exception e) {
             log.fine("[Rec#"+jobIndex+"] ignoring invalid number ("+values[i]+")");
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               insertPstmt.setNull(i+1, dataTypes.get(i+1).sqlType);
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -525,7 +527,7 @@ public class DatabaseSession {
             insertPstmt.setObject(i+1, new BigDecimal(values[i]).doubleValue());
           } catch (Exception e) {
             log.fine("[Rec#"+jobIndex+"] ignoring invalid number ("+values[i]+")");
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               insertPstmt.setNull(i+1, dataTypes.get(i+1).sqlType);
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -539,7 +541,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.fine("[Rec#"+jobIndex+"] ignoring unparseable date ("+values[i]+")");
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               insertPstmt.setNull(i+1, dataTypes.get(i+1).sqlType);
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -558,7 +560,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.fine("[Rec#"+jobIndex+"] ignoring unparseable date ("+values[i]+")");
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               insertPstmt.setNull(i+1, dataTypes.get(i+1).sqlType);
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");
@@ -576,7 +578,7 @@ public class DatabaseSession {
           javaDate = toDate(values[i]);
           if(javaDate == null){
             log.fine("[Rec#"+jobIndex+"] ignoring unparseable date ("+values[i]+")");
-            if(System.getProperty("skip.invalid.field") == null)
+            if(System.getProperty(ConfigLoader.SYS_PROP_SKIP_INV_FLD) == null)
               insertPstmt.setNull(i+1, dataTypes.get(i+1).sqlType);
             else{
               log.warning("[Rec#"+jobIndex+"] Skipping record with unexpected value at param index "+(i+1)+". Value ["+values[i]+"]");

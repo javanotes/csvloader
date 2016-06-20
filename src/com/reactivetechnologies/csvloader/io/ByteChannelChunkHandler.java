@@ -40,19 +40,37 @@ import java.util.logging.Logger;
  */
 class ByteChannelChunkHandler extends AbstractFileChunkHandler implements Closeable{
   private static final Logger log = Logger.getLogger(ByteChannelChunkHandler.class.getSimpleName());
-  private FileChannel iStream;
-  private FileChannel oStream;
-  //private static final Logger log = LoggerFactory.getLogger(MemoryMappedChunkHandler.class);
+  private FileChannel fileChannel;
+  private boolean direct;
   /**
    * 
    * Write mode.
    * @throws IOException
-   * @deprecated Experimental. Not to be used.
    */
-  private ByteChannelChunkHandler(String writeDir) throws IOException
+  public ByteChannelChunkHandler(String writeDir, int buffSize, boolean direct, String fileName) throws IOException
   {
     super(writeDir);
-    buffer = null;
+    readSize = buffSize;
+    this.direct = direct;
+  }
+  @Override
+  protected void moveExistingFile() throws IOException
+  {
+    fileChannel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE, 
+        StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.APPEND);
+    
+    buffer = direct ? ByteBuffer.allocateDirect(readSize) : ByteBuffer.allocate(readSize);
+    
+    log.info("Write ready for target file ["+file+"]. Existing file (if any) was truncated.");
+  }
+  /**
+   * Write mode with default buffer size of 8192
+   * @param writeDir
+   * @throws IOException
+   */
+  public ByteChannelChunkHandler(String writeDir, String fileName) throws IOException
+  {
+    this(writeDir, 8192, false, fileName);
   }
   /**
    * Read mode with default chunk size of 8192.
@@ -71,7 +89,7 @@ class ByteChannelChunkHandler extends AbstractFileChunkHandler implements Closea
    */
   public ByteChannelChunkHandler(File f, int chunkSize) throws IOException {
     super(f);
-    iStream = FileChannel.open(file.toPath(), StandardOpenOption.READ);
+    fileChannel = FileChannel.open(file.toPath(), StandardOpenOption.READ);
     readSize = chunkSize;
     chunks = fileSize % readSize == 0 ? (int) ((fileSize / readSize)) : (int) ((fileSize / readSize) + 1);
     buffer = ByteBuffer.allocate(readSize);
@@ -79,19 +97,20 @@ class ByteChannelChunkHandler extends AbstractFileChunkHandler implements Closea
     log.info("Reading source file of ["+fileSize+"] bytes. Expected chunks to read "+chunks+","
         + " with chunk size "+readSize);
   }
-  private final ByteBuffer buffer;
+  private ByteBuffer buffer;
   protected int chunks;
   @Override
   public void close() throws IOException {
-    if (iStream != null) {
-      iStream.force(true);
-      iStream.close();
+    if (fileChannel != null) {
+      fileChannel.force(true);
+      fileChannel.close();
     }
-    if(oStream != null){
-      oStream.force(true);
-      oStream.close();
+    if(buffer != null)
+    {
+      buffer.clear();
+      MemoryMappedChunkHandler.unmap(buffer);
+      buffer = null;
     }
-    
   }
 
   protected int idx = 0;
@@ -99,7 +118,7 @@ class ByteChannelChunkHandler extends AbstractFileChunkHandler implements Closea
   @Override
   public FileChunk readNext() throws IOException {
       
-    int read = iStream.read(buffer);
+    int read = fileChannel.read(buffer);
     if(read == -1)
       return null;
     buffer.flip();
@@ -119,31 +138,22 @@ class ByteChannelChunkHandler extends AbstractFileChunkHandler implements Closea
    * 
    * @param chunk
    * @throws IOException
-   * @deprecated Experimental. Not to be used.
    */
   @Override
   public void writeNext(FileChunk chunk) throws IOException {
-    if(buffer == null)
-      throw new UnsupportedOperationException();
     
     if(file == null)
     {
       initWriteFile(chunk);
-      oStream = FileChannel.open(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
             
     }
     
-    
-    doAttribCheck(chunk);
-        
     fileSize += chunk.getChunk().length;
-    
-    if(fileSize > chunk.getFileSize())
-      throw new IOException("File size ["+fileSize+"] greater than expected size ["+chunk.getFileSize()+"]");
     
     buffer.clear();
     buffer.put(chunk.getChunk());
-    oStream.write(buffer);
+    buffer.flip();
+    fileChannel.write(buffer);
         
   }
   

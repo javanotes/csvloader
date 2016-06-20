@@ -16,7 +16,10 @@ import java.util.logging.Logger;
 
 import javax.sql.DataSource;
 
+import com.reactivetechnologies.csvloader.db.DataSourceFactory;
+import com.reactivetechnologies.csvloader.db.DatabaseWriter;
 import com.reactivetechnologies.csvloader.io.AsciiFileReader;
+import com.reactivetechnologies.csvloader.net.SocketCSVLoader;
 
 public class CSVLoader implements JobAllocator {
   
@@ -27,12 +30,12 @@ public class CSVLoader implements JobAllocator {
   private static final Logger log = Logger.getLogger(CSVLoader.class.getSimpleName());
 	private ExecutorService threadPool;
 	private Job job = null;
-	private JobExecutor executor = null;
+	protected JobExecutor executor = null;
 	private int loadPerThread = 0;
 	private final AtomicLong loadCount = new AtomicLong();
 	private int threadCount = 0, executorCount = 1;
 	private DataSource ds;
-	private final boolean inOrder;
+	private boolean immediate;
 	/**
 	 * 
 	 * @param loadPerThread
@@ -41,12 +44,12 @@ public class CSVLoader implements JobAllocator {
 	{
 	  ds = DataSourceFactory.getDataSource();
 		this.loadPerThread = loadPerThread;
-		inOrder = ConfigLoader.isInOrderProcessing();
-		if(System.getProperty("max.thread") != null)
+		immediate = ConfigLoader.isImmediateProcessing();
+		if(System.getProperty(ConfigLoader.SYS_PROP_THREADS) != null)
 		{
 		  try 
 		  {
-        int noOfThreads = Integer.valueOf(System.getProperty("max.threads"));
+        int noOfThreads = Integer.valueOf(System.getProperty(ConfigLoader.SYS_PROP_THREADS));
         threadPool = Executors.newFixedThreadPool(noOfThreads, new ThreadFactory() {
           @Override
           public Thread newThread(Runnable r) {
@@ -55,39 +58,31 @@ public class CSVLoader implements JobAllocator {
             return t;
           }
         });
-      } catch (NumberFormatException e) {
-        threadPool = Executors.newCachedThreadPool(new ThreadFactory() {
-          @Override
-          public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "jobExecutor-"+(threadCount++));
-            t.setDaemon(true);
-            return t;
-          }
-        });
-      }
+      } catch (NumberFormatException e) {}
 		}
-		else
+		if(threadPool == null)
 		{
-		  threadPool = Executors.newCachedThreadPool(new ThreadFactory() {
-	      @Override
-	      public Thread newThread(Runnable r) {
-	        Thread t = new Thread(r, "jobExecutor-"+(threadCount++));
-	        t.setDaemon(true);
-	        return t;
-	      }
-	    });
+		  threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(), new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable r) {
+          Thread t = new Thread(r, "jobExecutor-"+(threadCount++));
+          t.setDaemon(true);
+          return t;
+        }
+      });
 		}
 		
 		executor = new DatabaseWriter(loadPerThread, loadCount, ds);
 		threadPool.execute(executor);
 	}
 	
-	public int getloadCount(){
+	@Override
+  public int getloadCount(){
 		return loadCount.intValue();
 	}
 
 	private List<JobExecutor> executors;
-	boolean added;
+	
 	/**
 	 * Order of records may not be maintained
 	 */
@@ -106,23 +101,23 @@ public class CSVLoader implements JobAllocator {
 	  }
     if(job != null)
     {
-      added = false;
-      for(JobExecutor exec : executors)
+      boolean added = false;
+      do 
       {
-        if(exec.addJobImmediate(job))
-        {
-          added = true;
-          break;
+        for (JobExecutor exec : executors) {
+          if (exec.addJobImmediate(job)) {
+            added = true;
+            job = null;
+            break;
+          }
         }
-      }
-      if(!added)
-      {
-        executor = new DatabaseWriter(loadPerThread, loadCount, ds);
-        threadPool.execute(executor);
-        executors.add(executor);
-        executorCount++;
-        allocate();
-      }
+        if (!added) {
+          executor = new DatabaseWriter(loadPerThread, loadCount, ds);
+          threadPool.execute(executor);
+          executors.add(executor);
+          executorCount++;
+        } 
+      } while (!added);
       
     }
     else
@@ -150,7 +145,7 @@ public class CSVLoader implements JobAllocator {
         executor = new DatabaseWriter(loadPerThread, loadCount, ds);
         threadPool.execute(executor);
         executorCount++;
-        allocate();
+        allocateInOrder();
       }
     }
     else
@@ -162,20 +157,21 @@ public class CSVLoader implements JobAllocator {
 	 * 
 	 */
 	public void allocate(){
-		if(inOrder)
+		if(!immediate)
 		  allocateInOrder();
 		else
 		  allocateImmediate();
 	}
 
-	public void clean() throws Exception{
+	@Override
+  public void clean() throws Exception{
 		threadPool.shutdown();
 		threadPool.awaitTermination(600, TimeUnit.MINUTES);
 	}
 	
 	private void loadByChannelIO(String fileName, int ignoreFirstLine, String separator)
 	{
-	  try(AsciiFileReader reader = new AsciiFileReader(new File(fileName), System.getProperty("mem.mapped") != null))
+	  try(AsciiFileReader reader = new AsciiFileReader(new File(fileName), System.getProperty(ConfigLoader.SYS_PROP_MMAP_IO) != null))
 	  {
 	    String strLine = "";
       while( (strLine = reader.readLine()) != null){
@@ -191,14 +187,20 @@ public class CSVLoader implements JobAllocator {
      log.log(Level.SEVERE, "File reading error", e);
   }}
 	private int line = 1;
-	private void loadNextLine(String strLine, String separator)
+	
+	/**
+	 * Loads next line
+	 * @param strLine
+	 * @param separator
+	 */
+	protected void loadNextLine(String strLine, String separator)
 	{
 	  //log.info(strLine);
 	  String[] values = strLine.split(separator, -1);
     job = new Job();
-    job.jobIndex = line++;
+    job.setJobIndex(line++);
     job.setJobDefn(values);
-    job.payload = strLine;
+    job.setPayload(strLine);
     allocate();
     
 	}
@@ -223,42 +225,51 @@ public class CSVLoader implements JobAllocator {
       e.printStackTrace();
     }
 	}
+  protected long startTime;
   /**
    * 
    * @param fileName
    * @param ignoreFirstLine
    * @param separator
    */
-	public void load(String fileName, int ignoreFirstLine, String separator){
-	  
-	  if(System.getProperty("buff.read") != null)
+	
+  protected void load(String fileName, int ignoreFirstLine, String separator){
+    startTime = System.currentTimeMillis();
+	  if(System.getProperty(ConfigLoader.SYS_PROP_BUFF_IO) != null)
 	    loadByBufferedIO(fileName, ignoreFirstLine, separator);
 	  else
 	    loadByChannelIO(fileName, ignoreFirstLine, separator);
 	}
-	public static void run()
+  /**
+   * 
+   * @param args
+   */
+	public static void run(String...args)
   {
     try 
     {
       int loadPerThread = Integer.parseInt(
           ConfigLoader.getConfig().getProperty(ConfigLoader.LOAD_PER_THREAD));
-      int ignoreFirstLine = Integer.parseInt(ConfigLoader.getConfig()
-          .getProperty(ConfigLoader.LOAD_IGNORE_FIRST_LINE));
-      String loadFileName = ConfigLoader.getConfig()
-          .getProperty(ConfigLoader.LOAD_FILE_NAME);
-      String sep = ConfigLoader.getConfig()
-          .getProperty(ConfigLoader.LOAD_SEPARATOR);
-
-      CSVLoader loader = new CSVLoader(loadPerThread);
       
+      CSVLoader loader = null;
+      try {
+        int port = Integer.parseInt(args[0]);
+        loader = new SocketCSVLoader(loadPerThread, port, ConfigLoader.getConfig()
+            .getProperty(ConfigLoader.LOAD_SEPARATOR), Integer.parseInt(ConfigLoader.getConfig()
+                .getProperty(ConfigLoader.LOAD_IGNORE_FIRST_LINE)));
+      } catch (NumberFormatException e) {
+        loader = new CSVLoader(loadPerThread);
+      }
+            
       log.info("############ Start execution ############");
-      long start = System.currentTimeMillis();
-      loader.load(loadFileName, ignoreFirstLine, sep);
+      loader.startTime = System.currentTimeMillis();
+      loader.load();
       loader.clean();
       long end = System.currentTimeMillis();
       log.info("############ End execution ##############");
+      
       log.info("Loaded " + loader.getloadCount() + " records using "
-          + loader.executorCount + " executor(s), on "+loader.threadCount+" thread(s) in "+timeString(end-start));
+          + loader.executorCount + " executor(s), on "+loader.threadCount+" thread(s) in "+timeString(end-loader.startTime));
       
     } 
     catch (Exception e) {
@@ -280,8 +291,22 @@ public class CSVLoader implements JobAllocator {
 	}
 	public static void main(String[] args){
 		
-		run();		
+		run(args);		
 				
 	}
+
+  @Override
+  public void load() {
+    
+    int ignoreFirstLine = Integer.parseInt(ConfigLoader.getConfig()
+        .getProperty(ConfigLoader.LOAD_IGNORE_FIRST_LINE));
+    String loadFileName = ConfigLoader.getConfig()
+        .getProperty(ConfigLoader.LOAD_FILE_NAME);
+    String sep = ConfigLoader.getConfig()
+        .getProperty(ConfigLoader.LOAD_SEPARATOR);
+    
+    load(loadFileName, ignoreFirstLine, sep);
+    
+  }
 
 }

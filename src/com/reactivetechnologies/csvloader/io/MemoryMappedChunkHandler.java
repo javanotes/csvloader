@@ -32,11 +32,14 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.StandardOpenOption;
 import java.util.logging.Logger;
+
+import com.reactivetechnologies.csvloader.ConfigLoader;
 /**
  * Reads and writes using mapped byte buffer
  */
@@ -45,7 +48,7 @@ class MemoryMappedChunkHandler extends AbstractFileChunkHandler implements Close
   private FileChannel iStream;
   private FileChannel oStream;
   //private static final Logger log = LoggerFactory.getLogger(MemoryMappedChunkHandler.class);
-  public static final long DEFAULT_MEM_MAP_SIZE = Long.parseLong(System.getProperty("mmap.size", "8388608"));
+  public static final long DEFAULT_MEM_MAP_SIZE = Long.parseLong(System.getProperty(ConfigLoader.SYS_PROP_MMAP_SIZE, "8388608"));
   /**
    * 
    * Write mode.
@@ -185,8 +188,12 @@ class MemoryMappedChunkHandler extends AbstractFileChunkHandler implements Close
       throw new IOException("File size ["+fileSize+"] greater than expected size ["+chunk.getFileSize()+"]");
         
   }
-    
-  private static boolean unmap(MappedByteBuffer bb)
+  /**
+   *   
+   * @param bb
+   * @return
+   */
+  static boolean unmap(ByteBuffer bb)
   {
     /*
      * From  sun.nio.ch.FileChannelImpl
@@ -199,6 +206,7 @@ class MemoryMappedChunkHandler extends AbstractFileChunkHandler implements Close
 
        }
      */
+    Method cleaner_method = null, clean_method = null;
     try 
     {
       if(cleaner_method == null)
@@ -218,13 +226,13 @@ class MemoryMappedChunkHandler extends AbstractFileChunkHandler implements Close
         } 
       }
 
-    } catch (Exception ex) 
+    } catch (Throwable ex) 
     {
       //ignored   
     }
     return false;
   }
-  private static Method cleaner_method, clean_method;
+  
   private static Method findMethod(Class<?> class1, String method) throws NoSuchMethodException {
     for(Method m : class1.getDeclaredMethods())
     {

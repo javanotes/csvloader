@@ -1,5 +1,6 @@
-package com.reactivetechnologies.csvloader;
+package com.reactivetechnologies.csvloader.db;
 
+import java.io.Closeable;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -12,7 +13,11 @@ import java.util.logging.Logger;
 
 import javax.sql.DataSource;
 
-public class DatabaseWriter implements JobExecutor{
+import com.reactivetechnologies.csvloader.ConfigLoader;
+import com.reactivetechnologies.csvloader.Job;
+import com.reactivetechnologies.csvloader.JobExecutor;
+
+public class DatabaseWriter implements JobExecutor, Closeable{
 	private static final Logger log = Logger.getLogger(DatabaseWriter.class.getSimpleName());
 	private ArrayList<Job> jobList = new ArrayList<Job>();
 	private final int jobCapacity;
@@ -24,14 +29,12 @@ public class DatabaseWriter implements JobExecutor{
 	 * @param jobCapacity
 	 * @param counter
 	 */
-	DatabaseWriter(int jobCapacity, AtomicLong counter, DataSource ds){
+	public DatabaseWriter(int jobCapacity, AtomicLong counter, DataSource ds){
 		this.jobCapacity = jobCapacity;
 		this.counter = counter;
-    jobQ = ConfigLoader.isInOrderProcessing()
-        ? (ConfigLoader.inorderProcQSize() != -1
-            ? new ArrayBlockingQueue<Job>(ConfigLoader.inorderProcQSize())
-            : new ArrayBlockingQueue<Job>(this.jobCapacity))
-        : new ArrayBlockingQueue<Job>(1000);
+    jobQ = ConfigLoader.isImmediateProcessing()
+        ? new ArrayBlockingQueue<Job>(this.jobCapacity)
+        : new ArrayBlockingQueue<Job>(ConfigLoader.getBatchSize());
 		this.ds = ds;
 	}
 	private BlockingQueue<Job> jobQ;
@@ -61,7 +64,7 @@ public class DatabaseWriter implements JobExecutor{
 	{
 	  DatabaseSession session = new DatabaseSession(counter, ds);  
     try {
-      session.setBatchSize(Integer.valueOf(ConfigLoader.getConfig().getProperty(ConfigLoader.LOAD_BATCH_SIZE, "100")));
+      session.setBatchSize(ConfigLoader.getBatchSize());
     } catch (NumberFormatException e) {
       
     }
@@ -77,7 +80,7 @@ public class DatabaseWriter implements JobExecutor{
 	{
     DatabaseSession session = new DatabaseSession(counter, ds); 
     try {
-      session.setBatchSize(Integer.valueOf(ConfigLoader.getConfig().getProperty(ConfigLoader.LOAD_BATCH_SIZE, "100")));
+      session.setBatchSize(ConfigLoader.getBatchSize());
     } catch (NumberFormatException e) {
       
     }
@@ -94,10 +97,10 @@ public class DatabaseWriter implements JobExecutor{
       for(Job job : jobList){
         String[] values = (String[]) job.getJobDefn();
         try {
-          session.addBatch(values, job.jobIndex);
+          session.addBatch(values, job.getJobIndex());
           //log.info("Record# "+job.jobIndex+"> "+job.payload);
         } catch (Exception e) {
-          log.warning("["+Thread.currentThread().getName()+"] Skipping load record ["+job.payload+"] "+e.getMessage());
+          log.warning("["+Thread.currentThread().getName()+"] Skipping load record ["+job.getPayload()+"] "+e.getMessage());
         }
       }
       session.executeBatch();
@@ -112,13 +115,13 @@ public class DatabaseWriter implements JobExecutor{
     }
   
 	}
+  private DatabaseSession session = null;
   /**
    * 
    */
 	private void run0()
 	{
-	  
-    DatabaseSession session = null;
+	      
     try 
     {
       
@@ -128,7 +131,7 @@ public class DatabaseWriter implements JobExecutor{
         try 
         {
           job = jobQ.poll(10, TimeUnit.MILLISECONDS);
-          if(job instanceof PPJob)
+          if(job instanceof PoisonPill)
             break;
           if(job != null)
           {
@@ -140,10 +143,10 @@ public class DatabaseWriter implements JobExecutor{
             String[] values = (String[]) job.getJobDefn();
             try 
             {
-              session.addBatch(values, job.jobIndex);
+              session.addBatch(values, job.getJobIndex());
               //log.info("Record# "+job.jobIndex+"> "+job.payload);
             } catch (Exception e) {
-              log.warning("Batch exception at [Rec#"+job.jobIndex+"] Skipping load record ["+job.payload+"] "+e.getMessage());
+              log.warning("Batch exception at [Rec#"+job.getJobIndex()+"] Skipping load record ["+job.getPayload()+"] "+e.getMessage());
             }
           }
         } catch (InterruptedException e1) {
@@ -155,27 +158,22 @@ public class DatabaseWriter implements JobExecutor{
     } 
     finally
     {
-      if(session != null)
-      {
-        try {
-          session.executeBatch();
-        } catch (SQLException e) {
-          log.log(Level.SEVERE, "Execute batch caught exception", e);
-        }
-        session.close();
-      }
-      jobQ.clear();
-      jobQ = null;
+      close();
     }
      
 	}
+	
+	
 	@Override
 	public void run() {
 	  run0();
 	}
 
 	private final AtomicInteger offered = new AtomicInteger(0);
-	private static class PPJob extends Job
+	/**
+	 * 
+	 */
+	private static class PoisonPill extends Job
 	{
 
     /**
@@ -184,16 +182,23 @@ public class DatabaseWriter implements JobExecutor{
     private static final long serialVersionUID = 1L;
 	  
 	}
+	/**
+	 * 
+	 */
 	public void stop()
 	{
-	  offer(new PPJob());
+	  log.info("stopping db writer..");
+	  offer(new PoisonPill());
 	}
 	private void offer(Job j)
 	{
-	  try {
-      while(!jobQ.offer(j, 10, TimeUnit.MILLISECONDS));
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
+	  if (!stopped) {
+      try {
+        while (!jobQ.offer(j, 10, TimeUnit.MILLISECONDS))
+          ;
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      } 
     }
 	}
 	/**
@@ -207,15 +212,36 @@ public class DatabaseWriter implements JobExecutor{
 	  }
 	  stop();
 	  return false;
-		/*if(jobList.size() < jobCapacity){
-			jobList.add(job);
-			return true;
-		}
-		return false;*/
+		
 	}
-
+	/**
+	 * 
+	 */
   @Override
   public boolean addJobImmediate(Job job) {
-    return jobQ.offer(job);
+    if (!stopped) {
+      return jobQ.offer(job);
+    }
+    return false;
+  }
+
+  private volatile boolean stopped;
+  @Override
+  public void close()  {
+    if(session != null)
+    {
+      try {
+        session.executeBatch();
+      } catch (SQLException e) {
+        log.log(Level.SEVERE, "Execute batch caught exception on closing", e);
+      }
+      session.close();
+      session = null;
+    }
+    if (jobQ != null) {
+      jobQ.clear();
+      jobQ = null;
+    }
+    stopped = true;
   }
 }

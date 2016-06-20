@@ -1,4 +1,4 @@
-package com.reactivetechnologies.csvloader;
+package com.reactivetechnologies.csvloader.db;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
@@ -8,6 +8,8 @@ import java.util.Properties;
 import java.util.logging.Logger;
 
 import javax.sql.DataSource;
+
+import com.reactivetechnologies.csvloader.ConfigLoader;
 
 public class DataSourceFactory {
 

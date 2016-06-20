@@ -1,6 +1,6 @@
 /* ============================================================================
 *
-* FILE: ColumnMeta.java
+* FILE: UTF8StreamReader.java
 *
 The MIT License (MIT)
 
@@ -26,23 +26,49 @@ SOFTWARE.
 *
 * ============================================================================
 */
-package com.reactivetechnologies.csvloader;
+package com.reactivetechnologies.csvloader.net;
 
-class ColumnMeta
-{
-  public ColumnMeta(Class<?> type, String name, int sqlType, boolean notNull) {
+import java.io.IOException;
+import java.util.concurrent.BlockingQueue;
+import java.util.logging.Logger;
+
+import com.reactivetechnologies.csvloader.io.AsciiFileReader;
+
+class UTF8StreamReader extends AsciiFileReader {
+
+  private final BlockingQueue<byte[]> in;
+  /**
+   * 
+   * @param out
+   * @throws IOException
+   */
+  public UTF8StreamReader(BlockingQueue<byte[]> out) throws IOException {
     super();
-    this.type = type;
-    this.name = name;
-    this.sqlType = sqlType;
-    this.notNull = notNull;
+    in = out;
+    doRun();
   }
-  public boolean isNotNull() {
-    return notNull;
+
+  @Override
+  protected void doFetch() throws IOException
+  {
+    try 
+    {
+      byte[] available = in.take();
+      while (!isEOS(available)) {
+        log.fine("available found ..."+available.length);
+        splitBytes(available);
+        available = in.take();
+      }
+    } catch (InterruptedException e) {
+      log.severe("Unable to start reading byte sequence!");
+    }
+    doEOF();
+    log.fine("EOF done..");
   }
-  private final boolean notNull;
-  final Class<?> type;
-  final String name;
-  final int sqlType;
-  int size;
+  private static boolean isEOS(byte[] available) {
+    return available.length >= 1 && available[available.length - 1] == -1;
+  }
+  private static final Logger log = Logger.getLogger(UTF8StreamReader.class.getSimpleName());
+  
+
 }

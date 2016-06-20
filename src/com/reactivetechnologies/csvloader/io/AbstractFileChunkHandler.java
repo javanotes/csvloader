@@ -43,7 +43,7 @@ import java.util.logging.Logger;
  * should provide low level implementations for actual file IO handling.
  * @see ByteChannelChunkHandler
  */
-public abstract class AbstractFileChunkHandler implements Closeable{
+abstract class AbstractFileChunkHandler implements Closeable{
 
   private static final Logger log = Logger.getLogger(AbstractFileChunkHandler.class.getSimpleName());
   //private static final Logger log = LoggerFactory.getLogger(AbstractFileChunkHandler.class);
@@ -86,6 +86,8 @@ public abstract class AbstractFileChunkHandler implements Closeable{
   protected void initWriteFile(FileChunk chunk) throws IOException
   {
     file = new File(dir, chunk.getFileName());
+    if(!file.createNewFile())
+      throw new IOException("Unable to create write file");
     
     moveExistingFile();
     
