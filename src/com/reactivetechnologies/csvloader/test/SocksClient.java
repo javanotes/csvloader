@@ -29,8 +29,8 @@ SOFTWARE.
 package com.reactivetechnologies.csvloader.test;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -43,6 +43,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class SocksClient implements Closeable{
 
@@ -153,21 +154,33 @@ public class SocksClient implements Closeable{
     }
   }
   
-  void requestResponseInBytes(int i, double d, String s) throws IOException
+  String requestResponseInBytes(int i, double d, String s) throws IOException
   {
-    DataOutputStream writer = new DataOutputStream(channel.socket().getOutputStream());
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    DataOutputStream writer = new DataOutputStream(out);
+    
+    int len = 16 + s.toCharArray().length*2;
+    
     try
     {
+      writer.writeInt(len);
       writer.writeInt(i);
       writer.writeDouble(d);
-      writer.writeUTF(s);
+      writer.writeInt(s.toCharArray().length);
+      writer.writeChars(s);
+      
       writer.flush();
       
+      channel.write(ByteBuffer.wrap(out.toByteArray()));
+      ByteBuffer buff = ByteBuffer.allocate(1024);
+      int read = channel.read(buff);
+      
+     String r = new String(Arrays.copyOfRange(buff.array(), 0, read), StandardCharsets.UTF_8);
+     return r; 
     }
     finally
     {
       try {
-        
         writer.close();
       } catch (Exception e) {
         
@@ -190,16 +203,27 @@ public class SocksClient implements Closeable{
     }
     for(int i = 0; i<iteration; i++)
     {
+      SocksClient c = clients[i];
       try {
-        SocksClient c = clients[i];
+        
         if(c != null)
         {
           String msg = "Sending: "+i;
           //System.out.println("SENT: "+msg+"\tRECV: "+c.requestResponseInString(msg));
-          c.requestResponseInBytes(i, i+0.5, msg);
+          System.out.println("SENT: "+msg+"\tRECV: "+c.requestResponseInBytes(i, i+0.5, msg));
+          
         }
       } catch (IOException e) {
-        System.err.println("req/res failed ["+i+"] => "+e.getMessage());
+        System.err.println("req/res failed ["+i+"] -- stacktrace -- \n");
+        e.printStackTrace();
+      }
+      finally
+      {
+        try {
+          c.close();
+        } catch (IOException e) {
+          
+        }
       }
     }
   }
@@ -214,7 +238,7 @@ public class SocksClient implements Closeable{
       e.printStackTrace();
     }*/
     
-    loadTest(1000, "localhost", 8192);
+    loadTest(100, "localhost", 8192);
     System.out.println("-- End run --");
   }
   @Override

@@ -36,6 +36,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -44,7 +45,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * A simple socket server.
+ * A lightweight and fast, fixed length bytes protocol server, based on non-blocking NIO. Designed using a reactor pattern with a single thread for IO operations, 
+ * and multiple threads for process execution.<p>Extend {@linkplain ProtocolHandlerFactory} to provide a 
+ * custom {@linkplain ProtocolHandler} and override {@linkplain ProtocolHandler#doProcess(java.io.DataInputStream) doProcess()} 
+ * and {@linkplain ProtocolHandler#doRead(SocketChannel) doRead()} methods. 
+ * Register the factory using {@link #registerProtocolFactory(ProtocolHandlerFactory) registerProtocolFactory()} before invoking {@link #startServer()}.
+ * <p>
+ * 
+ * @see ProtocolHandler
  */
 public class ServerSocketListener implements Runnable{
 
@@ -52,7 +60,7 @@ public class ServerSocketListener implements Runnable{
   {
     System.setProperty("java.util.logging.SimpleFormatter.format", "%1$tF %1$tr %3$s %4$s:  %5$s%6$s %n");
   }
-  public static final int DEFAULT_READ_BUFF_SIZE = 64;
+  public static final int DEFAULT_READ_BUFF_SIZE = 32;
   static final Logger log = Logger.getLogger(ServerSocketListener.class.getSimpleName());
   private int port;
 
@@ -63,10 +71,11 @@ public class ServerSocketListener implements Runnable{
   private Selector selector;
 
   private volatile boolean running;
-  //private ExecutorService worker;
+  
   private int buffSize;
   private int maxThread;
   private ProtocolHandlerFactory protoFactory = new ProtocolHandlerFactory();
+  
   /**
    * 
    * @param port
@@ -142,20 +151,15 @@ public class ServerSocketListener implements Runnable{
     // accepting new connections
     serverChannel.register(selector, serverChannel.validOps());
 
-    /*ioThreads = Executors.newFixedThreadPool(maxThread/2, new ThreadFactory() {
-      
-      @Override
-      public Thread newThread(Runnable r) {
-        Thread t = new Thread(r, "Socket.IO.Worker-"+threadCounter++);
-        return t;
-      }
-    });*/
+    //single IO thread, multiple execution threads.
+    //For multi-threading the IO threads, would require
+    //a consistent hashed distribution pattern. Since we need to process the IO in order, for the same connection
     
     execThreads = Executors.newFixedThreadPool(maxThread, new ThreadFactory() {
       
       @Override
       public Thread newThread(Runnable r) {
-        Thread t = new Thread(r, "Socket.Exec.Worker-"+threadCounter++);
+        Thread t = new Thread(r, "Socket.Executor-"+threadCounter++);
         return t;
       }
     });
@@ -176,9 +180,9 @@ public class ServerSocketListener implements Runnable{
     
     SocketConnection conn = new SocketConnection(socketChannel, protoFactory.isSingleton() ? protoHandlerSingleton : protoFactory.getObject());
     conn.setSelKey(socketChannel.register(selector, SelectionKey.OP_READ, conn));
-    execThreads.submit(conn);
     
-    log.info("Accepted connection from remote host "+socketChannel.getRemoteAddress());
+    
+    log.info("["+Thread.currentThread().getName()+"] Accepted connection from remote host "+socketChannel.getRemoteAddress());
   }
   
   /**
@@ -190,25 +194,27 @@ public class ServerSocketListener implements Runnable{
     
     SocketChannel channel = ((SocketChannel) key.channel());
     SocketConnection conn = (SocketConnection) key.attachment();
+    
     try 
     {
-      
-      //TODO: move read to acceptor
+     
       if (channel.isOpen()) {
-        conn.fireRead();
+        if(conn.fireRead())
+        {
+          execThreads.submit(conn);
+        }
       }
       else
       {
-        removeConnection(key);
-        log.info("Remote client disconnected..");
+        disconnect(key);
+        log.info("["+Thread.currentThread().getName()+"] Remote client disconnected..");
       }
       
     } catch (IOException e) {
-      log.log(Level.WARNING, "Remote connection force closed", e);
-      removeConnection(key);
+      log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Remote connection force closed", e);
+      disconnect(key);
     }
     
-    log.fine("Channel read complete");
   }
   
   private void doSelect() throws IOException
@@ -218,14 +224,15 @@ public class ServerSocketListener implements Runnable{
     selector.select();
 
     // Iterate over the set of keys for which events are available
-    Iterator<SelectionKey> selectedKeys = selector.selectedKeys().iterator();
+    Set<SelectionKey> keySet = selector.selectedKeys();
+    Iterator<SelectionKey> selectedKeys = keySet.iterator();
     
     while (selectedKeys.hasNext()) {
       SelectionKey key = selectedKeys.next();
       selectedKeys.remove();
 
       if (!key.isValid()) {
-        removeConnection(key);
+        disconnect(key);
         continue;
       }
       
@@ -241,22 +248,19 @@ public class ServerSocketListener implements Runnable{
           write(key);
         }
       } catch (IOException e) {
-        log.log(Level.WARNING, "Ignoring exception and removing connection", e);
-        removeConnection(key);
+        log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Ignoring exception and removing connection", e);
+        disconnect(key);
       }
     }
   
+    keySet.clear();
   }
   
-  private void disconnect(SocketConnection conn) throws IOException
-  {
-    conn.close();
-    
-  }
+  
   @Override
   public void run() {
     running = true;
-    log.info("Listening on port "+port+" for connection.. ");
+    log.info("["+Thread.currentThread().getName()+"] Listening on port "+port+" for connection.. ");
     while (running) 
     {
 
@@ -265,17 +269,33 @@ public class ServerSocketListener implements Runnable{
         doSelect();
       } 
       catch (Exception e) {
-        log.log(Level.SEVERE, "Unexpected exception in selector loop", e);
+        log.log(Level.SEVERE, "["+Thread.currentThread().getName()+"] Unexpected exception in selector loop", e);
       }
     
 
     }
     close0();
-    log.info("Stopped listening ..");
+    log.info("["+Thread.currentThread().getName()+"] Stopped listening ..");
   }
   private void write(SelectionKey key) throws IOException {
+    SocketChannel channel = ((SocketChannel) key.channel());
     SocketConnection conn = (SocketConnection) key.attachment();
-    conn.fireWrite();
+    try 
+    {
+     
+      if (channel.isOpen()) {
+        conn.fireWrite();
+      }
+      else
+      {
+        disconnect(key);
+        log.info("["+Thread.currentThread().getName()+"] Remote client disconnected..");
+      }
+      
+    } catch (IOException e) {
+      log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Remote connection force closed", e);
+      disconnect(key);
+    }
     
   }
 
@@ -326,8 +346,9 @@ public class ServerSocketListener implements Runnable{
    * @param key
    * @throws IOException
    */
-  void removeConnection(SelectionKey key) throws IOException {
-    disconnect((SocketConnection) key.attachment());
+  private void disconnect(SelectionKey key) throws IOException {
+    ((SocketConnection) key.attachment()).close();
+    
   }
   private ProtocolHandler protoHandlerSingleton;
   /**

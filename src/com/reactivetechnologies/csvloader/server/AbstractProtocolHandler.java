@@ -35,14 +35,22 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
-
+/**
+ * An abstract implementation of a {@linkplain ProtocolHandler}. Applications should
+ * need to override {@link #doProcess(DataInputStream)} and {@link #doRead(SocketChannel)} methods.
+ * @see ProtocolHandlerFactory
+ */
 public abstract class AbstractProtocolHandler implements ProtocolHandler {
 
-  protected ByteArrayOutputStream out;
-  protected ByteBuffer readBuff;
+  protected ByteArrayOutputStream writeStream;
+  protected ByteBuffer readBuffer;
+  protected int totalRead = 0, read = 0;
+  /**
+   * 
+   */
   public AbstractProtocolHandler() {
-    readBuff = ByteBuffer.allocate(ServerSocketListener.DEFAULT_READ_BUFF_SIZE);
-    out = new ByteArrayOutputStream();
+    readBuffer = ByteBuffer.allocate(ServerSocketListener.DEFAULT_READ_BUFF_SIZE);
+    writeStream = new ByteArrayOutputStream();
   }
 
   /* (non-Javadoc)
@@ -53,12 +61,15 @@ public abstract class AbstractProtocolHandler implements ProtocolHandler {
   @Override
   public boolean doRead(SocketChannel channel) throws IOException
   {
-    readBuff.clear();
-    int read = channel.read(readBuff);
+    readBuffer.clear();
+    read = channel.read(readBuffer);
+    
     if(read == -1)
       return true;
-    readBuff.flip();
-    out.write(readBuff.array(), 0, read);
+    
+    totalRead += read;
+    readBuffer.flip();
+    writeStream.write(readBuffer.array(), 0, read);
     return false;
     
         
@@ -72,6 +83,6 @@ public abstract class AbstractProtocolHandler implements ProtocolHandler {
   
   @Override
   public InputStream getReadStream() {
-    return new ByteArrayInputStream(out.toByteArray());
+    return new ByteArrayInputStream(writeStream.toByteArray());
   }
 }

@@ -28,8 +28,8 @@ SOFTWARE.
 */
 package com.reactivetechnologies.csvloader.server;
 
-import java.io.DataInputStream;
-import java.nio.charset.StandardCharsets;
+import com.reactivetechnologies.csvloader.test.MyProtocolHandler;
+
 /**
  * Extend the factory to create custom handlers.
  * This class should be overriden.
@@ -39,19 +39,8 @@ public class ProtocolHandlerFactory {
 
   public ProtocolHandler getObject()
   {
-    return new AbstractProtocolHandler() {
-      
-      @Override
-      public byte[] doProcess(DataInputStream dataInputStream) throws Exception {
-        System.out.println("## THIS IS A DUMMY PROTOCOL PROCESSOR ##");
-        System.out.println("************* Processing **************");
-        System.out.println(dataInputStream.readInt());
-        System.out.println(dataInputStream.readDouble());
-        System.out.println(dataInputStream.readUTF());
-        System.out.println("************* End **************");
-        return "SUCCESS".getBytes(StandardCharsets.UTF_8);
-      }
-    };
+    
+    return new MyProtocolHandler();
   }
   
   public boolean isSingleton()

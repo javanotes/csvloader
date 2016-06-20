@@ -33,7 +33,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.SocketChannel;
 /**
- * 
+ * A protocol message converter. 
+ * @see AbstractProtocolHandler
  */
 public interface ProtocolHandler {
 
@@ -43,7 +44,7 @@ public interface ProtocolHandler {
    */
   InputStream getReadStream();
   /**
-   * Read from a given channel
+   * Read from a given channel, and return true when read is complete.
    * @return if read is complete
    * @throws IOException
    */

@@ -34,7 +34,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 /**
@@ -47,6 +46,7 @@ class SocketConnection implements Closeable, Runnable{
  
   private final SocketChannel channel;
   private final ProtocolHandler handler;
+  private final int connId;
   /**
    * 
    * @param r2aBuff
@@ -57,6 +57,8 @@ class SocketConnection implements Closeable, Runnable{
   {
     this.channel = channel;
     this.handler = handler;
+    connId = hashCode();
+    log.info("["+Thread.currentThread().getName()+"] New socket connection# "+connId);
   }
   
   private DataInputStream inStream;
@@ -66,113 +68,84 @@ class SocketConnection implements Closeable, Runnable{
    * For stateful semantics, a session state should be managed at application level.
    * TODO: This method should be overridden as necessary.
    */
-  private void read()
+  private boolean read()
   {
     try 
     {
       boolean complete = handler.doRead(channel);
       if(complete){
         inStream = new DataInputStream(handler.getReadStream());
-        synchronized (readComplete) {
-          readComplete.getAndSet(complete);
-          readComplete.notify();
-        }
+        
       }
       
+      return complete;
+      
     } catch (IOException e) {
-      log.log(Level.SEVERE, "Exception while reading from socket. Cleaning connection", e);
+      log.warning(e.getMessage());
       try {
         close();
       } catch (IOException e1) {
         log.warning(e.getMessage());
       }
     }
+    return false;
     
   }
-  private AtomicBoolean readComplete = new AtomicBoolean();
-  /**
-   * 
-   */
-  private class ReaderTask implements Runnable
-  {
-
-    @Override
-    public void run() {
-      read();
-      
-    }
-    
-  }
+  
   private void runProcess()
   {
     try 
     {
-      synchronized (readComplete) {
-        while(!readComplete.get())
-        {
-          try {
-            readComplete.wait(1000);
-          } catch (Exception e) {
-            Thread.currentThread().interrupt();
-          }
-        }
-      }
-      byte[] response = handler.doProcess(inStream);
-      writeBuff = ByteBuffer.wrap(response);
+      log.info("["+Thread.currentThread().getName()+"] Executing connection# "+connId);
+      writeBuff = ByteBuffer.wrap(handler.doProcess(inStream));
       selKey.interestOps(SelectionKey.OP_WRITE);
+      selKey.selector().wakeup();
+      
     } catch (Exception e) {
-      log.log(Level.SEVERE, "Exception while processing", e);
+      log.log(Level.SEVERE, "["+Thread.currentThread().getName()+"] Exception while processing connection# "+connId, e);
     }
   }
   private ByteBuffer writeBuff;
     
-  /**
-   * writer task
-   */
-  private class WriterTask implements Runnable
+  private void doWrite()
   {
-    
-    public WriterTask() {
-      
-    }
-    @Override
-    public void run() {
-      try 
-      {
-        channel.write(writeBuff);
-        if(!writeBuff.hasRemaining())
-          close();
-      } catch (IOException e) {
-        log.log(Level.SEVERE, "Exception while writing response", e);
+    try 
+    {
+      channel.write(writeBuff);
+      if(!writeBuff.hasRemaining())
+        close();
+    } catch (IOException e) {
+      log.warning(e.getMessage());
+      try {
+        close();
+      } catch (IOException e1) {
+        log.warning(e.getMessage());
       }
-      
     }
-    
   }
-      
+        
   @Override
   public void close() throws IOException {
     channel.finishConnect();
     channel.close();
     selKey.cancel();
-    log.info("Connection closed..");
+    log.info("["+Thread.currentThread().getName()+"] Connection closed# "+connId);
   }
   /**
    * submit response to processor threads.
    */
   void fireWrite() {
-    new WriterTask().run();  
+    doWrite();
   }
   
   /**
+   * @return 
    * 
    */
-  void fireRead() {
-    new ReaderTask().run();    
+  boolean fireRead() {
+    return read();  
   }
-  public SelectionKey getSelKey() {
-    return selKey;
-  }
+  
   public void setSelKey(SelectionKey selKey) {
     this.selKey = selKey;
   }
@@ -180,5 +153,8 @@ class SocketConnection implements Closeable, Runnable{
   public void run() {
     runProcess();
     
+  }
+  public int getConnId() {
+    return connId;
   }
 }
