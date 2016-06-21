@@ -36,6 +36,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -67,28 +68,26 @@ public class ServerSocketListener implements Runnable{
   // The channel on which we'll accept connections
   private ServerSocketChannel serverChannel;
 
-  // The selector we'll be monitoring
   private Selector selector;
-
-  private volatile boolean running;
-  
   private int buffSize;
-  private int maxThread;
+  private int maxExecutorThreads, maxAcceptorThreads;
   private ProtocolHandlerFactory protoFactory = new ProtocolHandlerFactory();
   
   /**
-   * 
-   * @param port
-   * @param readBufferSize
-   * @param maxThread
+   * Instantiate a new server. There will be total (maxExecutorThreads + maxAcceptorThreads + 1) threads running.
+   * @param port - listening port
+   * @param readBufferSize - read buffer size
+   * @param maxExecutorThreads - max process executor threads
+   * @param maxAcceptorThreads - max connection acceptor threads
    * @throws IOException
    */
-  public ServerSocketListener(int port, int readBufferSize, int maxThread) throws IOException {
+  public ServerSocketListener(int port, int readBufferSize, int maxExecutorThreads, int maxAcceptorThreads) throws IOException {
     this.port = port;
     ByteBuffer.allocate(readBufferSize);
     setBuffSize(readBufferSize);
-    this.maxThread = maxThread;
-    initSelector();
+    this.maxExecutorThreads = maxExecutorThreads;
+    this.maxAcceptorThreads = maxAcceptorThreads;
+    open();
     
   }
   private int threadCounter = 0;
@@ -98,7 +97,7 @@ public class ServerSocketListener implements Runnable{
    * @throws IOException
    */
   public ServerSocketListener(int port) throws IOException {
-    this(port, DEFAULT_READ_BUFF_SIZE, Runtime.getRuntime().availableProcessors());
+    this(port, Runtime.getRuntime().availableProcessors());
     
   }
   /**
@@ -108,7 +107,7 @@ public class ServerSocketListener implements Runnable{
    * @throws IOException
    */
   public ServerSocketListener(int port, int maxThread) throws IOException {
-    this(port, DEFAULT_READ_BUFF_SIZE, maxThread);
+    this(port, DEFAULT_READ_BUFF_SIZE, maxThread, maxThread/2);
     
   }
 
@@ -128,7 +127,7 @@ public class ServerSocketListener implements Runnable{
       log.severe("<Not started> ** "+e.getMessage()+" **");
     }
   }
-  private void initSelector() throws IOException {
+  private void open() throws IOException {
     // Create a new selector
     selector = Selector.open();
 
@@ -149,24 +148,32 @@ public class ServerSocketListener implements Runnable{
 
     // Register the server socket channel, indicating an interest in
     // accepting new connections
-    serverChannel.register(selector, serverChannel.validOps());
+    serverChannel.register(selector, SelectionKey.OP_ACCEPT);
 
     //single IO thread, multiple execution threads.
     //For multi-threading the IO threads, would require
     //a consistent hashed distribution pattern. Since we need to process the IO in order, for the same connection
-    
-    execThreads = Executors.newFixedThreadPool(maxThread, new ThreadFactory() {
+        
+    execThreads = Executors.newFixedThreadPool(maxAcceptorThreads, new ThreadFactory() {
       
       @Override
       public Thread newThread(Runnable r) {
-        Thread t = new Thread(r, "Socket.Executor-"+threadCounter++);
+        Thread t = new Thread(r, "Socket.Acceptor-"+threadCounter++);
         return t;
       }
     });
+    
+    acceptors = new LinkedList<>();
+    for(int i=0; i<maxExecutorThreads/2; i++)
+    {
+      acceptors.add(new SocketAcceptor(maxExecutorThreads));
+    }
   }
  
+  private LinkedList<SocketAcceptor> acceptors;
   
   private ExecutorService execThreads;
+  private boolean running;
   /**
    * 
    * @param key
@@ -175,45 +182,16 @@ public class ServerSocketListener implements Runnable{
   private void accept(SelectionKey key) throws IOException {
 
     SocketChannel socketChannel = serverChannel.accept();
-    
     socketChannel.configureBlocking(false);
-    
-    SocketConnection conn = new SocketConnection(socketChannel, protoFactory.isSingleton() ? protoHandlerSingleton : protoFactory.getObject());
-    conn.setSelKey(socketChannel.register(selector, SelectionKey.OP_READ, conn));
-    
-    
-    log.info("["+Thread.currentThread().getName()+"] Accepted connection from remote host "+socketChannel.getRemoteAddress());
-  }
-  
-  /**
-   * 
-   * @param key
-   * @throws IOException
-   */
-  private void read(SelectionKey key) throws IOException {
-    
-    SocketChannel channel = ((SocketChannel) key.channel());
-    SocketConnection conn = (SocketConnection) key.attachment();
-    
-    try 
-    {
-     
-      if (channel.isOpen()) {
-        if(conn.fireRead())
-        {
-          execThreads.submit(conn);
-        }
-      }
-      else
-      {
-        disconnect(key);
-        log.info("["+Thread.currentThread().getName()+"] Remote client disconnected..");
-      }
-      
-    } catch (IOException e) {
-      log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Remote connection force closed", e);
-      disconnect(key);
+    SocketConnector conn = new SocketConnector(socketChannel, protoFactory.isSingleton() ? protoHandlerSingleton : protoFactory.getObject());
+    //round robin dispatch
+    SocketAcceptor sa = acceptors.remove();
+    try {
+      sa.offer(conn);
+    } finally {
+      acceptors.addLast(sa);
     }
+    
     
   }
   
@@ -227,95 +205,57 @@ public class ServerSocketListener implements Runnable{
     Set<SelectionKey> keySet = selector.selectedKeys();
     Iterator<SelectionKey> selectedKeys = keySet.iterator();
     
-    while (selectedKeys.hasNext()) {
+    while (selectedKeys.hasNext()) 
+    {
       SelectionKey key = selectedKeys.next();
-      selectedKeys.remove();
-
+      
       if (!key.isValid()) {
-        disconnect(key);
+        selectedKeys.remove();
         continue;
       }
       
-      // Check what event is available and deal with it
-      try {
+      try 
+      {
         if (key.isAcceptable()) {
+          selectedKeys.remove();
           accept(key);
         }
-        else if (key.isValid() && key.isReadable()) {
-          read(key);
-        }
-        else if (key.isValid() && key.isWritable()) {
-          write(key);
-        }
+        
       } catch (IOException e) {
         log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Ignoring exception and removing connection", e);
-        disconnect(key);
+        
       }
     }
   
-    keySet.clear();
   }
   
   
   @Override
-  public void run() {
+  public void run() 
+  {
     running = true;
     log.info("["+Thread.currentThread().getName()+"] Listening on port "+port+" for connection.. ");
-    while (running) 
+    while(running)
     {
-
-      try 
-      {
+      try {
         doSelect();
-      } 
-      catch (Exception e) {
+      } catch (IOException e) {
         log.log(Level.SEVERE, "["+Thread.currentThread().getName()+"] Unexpected exception in selector loop", e);
       }
-    
-
     }
-    close0();
-    log.info("["+Thread.currentThread().getName()+"] Stopped listening ..");
+    stop();
   }
-  private void write(SelectionKey key) throws IOException {
-    SocketChannel channel = ((SocketChannel) key.channel());
-    SocketConnection conn = (SocketConnection) key.attachment();
-    try 
-    {
-     
-      if (channel.isOpen()) {
-        conn.fireWrite();
-      }
-      else
-      {
-        disconnect(key);
-        log.info("["+Thread.currentThread().getName()+"] Remote client disconnected..");
-      }
-      
-    } catch (IOException e) {
-      log.log(Level.WARNING, "["+Thread.currentThread().getName()+"] Remote connection force closed", e);
-      disconnect(key);
-    }
-    
-  }
-
-  /**
-   * Stops the server.
-   */
-  public void stopServer()
-  {
-    running = false;
-    selector.wakeup();
-  }
-
   
-  private void close0() {
+  private void stop() {
     try {
       selector.close();
     } catch (IOException e) {
       
     }
-    
+    for(SocketAcceptor socka : acceptors)
+    {
+      socka.stop();
+    }
     try {
       serverChannel.close();
     } catch (IOException e) {
@@ -328,11 +268,29 @@ public class ServerSocketListener implements Runnable{
       
     }
   }
+  
+
+  /**
+   * Stops the server.
+   */
+  public void stopServer()
+  {
+    running = false;
+    selector.wakeup();
+  }
+
+  
+  
   /**
    * Starts the server
    */
-  public void startServer() {
-    new Thread(this, "Socket.Acceptor").start();
+  public void startServer() 
+  {
+    for(SocketAcceptor socka : acceptors)
+    {
+      execThreads.submit(socka);
+    }
+    new Thread(this, "Server.Listener").start();
   }
   public int getBuffSize() {
     return buffSize;
@@ -346,10 +304,7 @@ public class ServerSocketListener implements Runnable{
    * @param key
    * @throws IOException
    */
-  private void disconnect(SelectionKey key) throws IOException {
-    ((SocketConnection) key.attachment()).close();
-    
-  }
+  
   private ProtocolHandler protoHandlerSingleton;
   /**
    * Registers a protocol factory to handle and process message. Should be invoked before {@link #startServer()}.

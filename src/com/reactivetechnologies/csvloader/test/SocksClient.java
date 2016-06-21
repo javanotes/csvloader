@@ -238,7 +238,7 @@ public class SocksClient implements Closeable{
       e.printStackTrace();
     }*/
     
-    loadTest(100, "localhost", 8192);
+    loadTest(1, "localhost", 8092);
     System.out.println("-- End run --");
   }
   @Override

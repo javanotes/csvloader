@@ -39,12 +39,20 @@ import java.util.logging.Logger;
 /**
  * 
  */
-class SocketConnection implements Closeable, Runnable{
+class SocketConnector implements Closeable, Runnable{
 
-  private static final Logger log = Logger.getLogger(SocketConnection.class.getSimpleName());
+  private static final Logger log = Logger.getLogger(SocketConnector.class.getSimpleName());
   private SelectionKey selKey;
  
   private final SocketChannel channel;
+  /**
+   * 
+   * @return
+   */
+  public SocketChannel getChannel() {
+    return channel;
+  }
+
   private final ProtocolHandler handler;
   private final int connId;
   /**
@@ -53,7 +61,7 @@ class SocketConnection implements Closeable, Runnable{
    * @param channel
    * @throws IOException
    */
-  SocketConnection(SocketChannel channel, ProtocolHandler handler) throws IOException
+  SocketConnector(SocketChannel channel, ProtocolHandler handler) throws IOException
   {
     this.channel = channel;
     this.handler = handler;
