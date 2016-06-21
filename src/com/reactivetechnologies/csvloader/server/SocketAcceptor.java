@@ -62,7 +62,9 @@ class SocketAcceptor implements Runnable {
   public void offer(SocketConnector conn) throws IOException
   {
     try {
-      while(!queuedConn.offer(conn, 100, TimeUnit.MILLISECONDS));
+      while(!queuedConn.offer(conn, 10, TimeUnit.MILLISECONDS)){
+        selector.wakeup();
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
